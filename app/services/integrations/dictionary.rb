@@ -1,6 +1,13 @@
+require 'net/http'
+
 module Integrations
   class Dictionary
     BASE_URL = 'https://api.dictionaryapi.dev/api/v2/entries/en/'.freeze
+    OPEN_TIMEOUT = 2
+    READ_TIMEOUT = 5
+
+    class Error < StandardError; end
+    class TransientError < Error; end
 
     def self.fetch_word_data(word)
       new(word).fetch_word_data
@@ -12,19 +19,36 @@ module Integrations
 
     def fetch_word_data
       response = make_request
-      return empty_result unless response.is_a?(Net::HTTPSuccess)
-
-      parse_response(response.body)
+      
+      case response
+      when ::Net::HTTPSuccess
+        parse_response(response.body)
+      when ::Net::HTTPNotFound
+        empty_result
+      when ::Net::HTTPTooManyRequests, ::Net::HTTPServerError
+        raise TransientError, "Transient error: #{response.code} #{response.message}"
+      else
+        raise Error, "Unexpected API response: #{response.code} #{response.message}"
+      end
+    rescue ::Net::OpenTimeout, ::Net::ReadTimeout => e
+      raise TransientError, "Timeout error: #{e.message}"
+    rescue Error => e
+      raise e
     rescue StandardError => e
-      Rails.logger.error("Integrations::Dictionary Error for word '#{@word}': #{e.message}")
-      empty_result
+      Rails.logger.error("Integrations::Dictionary Unexpected Error for word '#{@word}': #{e.message}")
+      raise Error, e.message
     end
 
     private
 
     def make_request
       uri = URI("#{BASE_URL}#{@word}")
-      Net::HTTP.get_response(uri)
+      
+      ::Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', 
+                      open_timeout: OPEN_TIMEOUT, read_timeout: READ_TIMEOUT) do |http|
+        request = ::Net::HTTP::Get.new(uri)
+        http.request(request)
+      end
     end
 
     def parse_response(body)

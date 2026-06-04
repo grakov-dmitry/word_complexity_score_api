@@ -8,7 +8,7 @@ class ProcessWordComplexity
   end
 
   def call
-    cached_words = DictionaryWord.where(word: @words).index_by(&:word)
+    cached_words = DictionaryWord.cached_words(@words)
     new_word_strings = @words - cached_words.keys
 
     new_words_data = fetch_and_save_new_words(new_word_strings)
@@ -35,24 +35,37 @@ class ProcessWordComplexity
 
     new_records_attributes = []
     results_map = {}
+    mutex = Mutex.new
 
-    word_strings.each do |word_string|
-      api_data = Integrations::Dictionary.fetch_word_data(word_string)
-      score = calculate_score(api_data)
+    word_strings.each_slice(5) do |slice|
+      threads = slice.map do |word_string|
+        Thread.new do
+          begin
+            api_data = Integrations::Dictionary.fetch_word_data(word_string)
+            score = calculate_score(api_data)
 
-      new_records_attributes << {
-        word: word_string,
-        synonyms_count: api_data[:synonyms_count],
-        antonyms_count: api_data[:antonyms_count],
-        definitions_count: api_data[:definitions_count],
-        complexity_score: score,
-        created_at: Time.current,
-        updated_at: Time.current
-      }
-      results_map[word_string] = score
+            mutex.synchronize do
+              new_records_attributes << {
+                word: word_string,
+                synonyms_count: api_data[:synonyms_count],
+                antonyms_count: api_data[:antonyms_count],
+                definitions_count: api_data[:definitions_count],
+                complexity_score: score,
+                created_at: Time.current,
+                updated_at: Time.current
+              }
+              results_map[word_string] = score
+            end
+          rescue StandardError => e
+            Rails.logger.error("Error processing word '#{word_string}' in thread: #{e.message}")
+            raise e
+          end
+        end
+      end
+      threads.each(&:join)
     end
 
-    DictionaryWord.insert_all(new_records_attributes) if new_records_attributes.any?
+    DictionaryWord.insert_all(new_records_attributes, unique_by: :word) if new_records_attributes.any?
 
     results_map
   end

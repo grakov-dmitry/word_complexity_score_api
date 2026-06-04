@@ -5,13 +5,16 @@ A Ruby on Rails API application that calculates the "complexity score" of Englis
 ## 🧠 How it Works
 
 The complexity score is calculated using the following formula:
-`score = (synonyms + antonyms) / definitions`
+`score = (unique_synonyms + unique_antonyms) / total_definitions`
 
 **Key Features:**
+- **High Concurrency:** The application leverages multi-threading within Sidekiq workers to process external API requests in parallel (using slices of 5 concurrent threads). This dramatically reduces total latency compared to sequential processing.
+- **Intentional Rate Limiting:** To ensure system stability and predictable performance, each request is strictly limited to **30 words**.
+- **Input Normalization:** All words are converted to lowercase before processing to ensure consistent caching and prevent duplicate API calls for words like "Happy" and "happy".
+- **Deduplication:** Synonyms and antonyms are deduplicated (`.uniq`) across all meanings and entries for a single word to provide a more accurate representation of its complexity.
 - **Background Processing:** The actual fetching and calculation are handled asynchronously using Sidekiq, preventing the API from blocking.
-- **Fail Fast:** Immediate input validation ensures only valid English words are processed.
-- **Caching:** Calculated scores are stored in a PostgreSQL database (using `jsonb`). If a word is requested again, the application retrieves it from the local cache instead of making another external API call.
-- **Smart Handling:** If a word doesn't exist in the external dictionary, it returns `null`.
+- **Caching:** Calculated scores are stored in a PostgreSQL database. If a word is requested again, the application retrieves it from the local cache instead of making another external API call.
+- **Smart Handling:** If a word doesn't exist in the external dictionary (404), it returns `null` and caches this definitive result.
 
 ## 🛠 Tech Stack
 
@@ -26,7 +29,7 @@ The complexity score is calculated using the following formula:
 ## 🚀 Setup & Installation (Local Development)
 
 ### 1. Project Initialization
-Clone the repository, install dependencies, and set up the database. 
+Clone the repository, install dependencies, and set up the databases. 
 
 **Note:** Ensure you have **Redis** installed and running. By default, the application connects to `redis://localhost:6379/1`. You can override this by setting the `REDIS_URL` environment variable.
 
@@ -34,9 +37,9 @@ Clone the repository, install dependencies, and set up the database.
 # Install gems
 bundle install
 
-# Create database and run migrations
-rails db:create
-rails db:migrate
+# Setup development and test databases
+bin/rails db:prepare
+RAILS_ENV=test bin/rails db:prepare
 ```
 
 ### 2. Running the Application
@@ -116,5 +119,9 @@ The project uses RSpec for testing, particularly focusing on the core business l
 
 To run the test suite:
 ```bash
+# Setup the test database
+RAILS_ENV=test rails db:prepare
+
+# Run tests
 bundle exec rspec
 ```

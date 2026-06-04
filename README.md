@@ -7,6 +7,8 @@ A Ruby on Rails API application that calculates the "complexity score" of Englis
 The complexity score is calculated using the following formula:
 `score = (unique_synonyms + unique_antonyms) / total_definitions`
 
+> **Note on Formula Implementation:** In this implementation, synonyms and antonyms are deduplicated across all meanings and entries. While the exact treatment of duplicate words across different definitions can be subjective, I chose to count only unique strings to prevent inflation of the score by repetitive data. In a real-world scenario, this logic would be clarified with a Product Manager or Stakeholder to align with specific business requirements.
+
 **Key Features:**
 - **High Concurrency:** The application leverages multi-threading within Sidekiq workers to process external API requests in parallel (using slices of 5 concurrent threads). This dramatically reduces total latency compared to sequential processing.
 - **Intentional Rate Limiting:** To ensure system stability and predictable performance, each request is strictly limited to **30 words**.
